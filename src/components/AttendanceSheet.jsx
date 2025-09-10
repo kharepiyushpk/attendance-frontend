@@ -122,7 +122,9 @@ export default function AttendanceSheet() {
       });
       if (!res.ok) throw new Error("Failed to update attendance");
       const updatedEmployee = await res.json();
-      setEmployees(prev => prev.map(e => e.empId === empId ? updatedEmployee : e));
+      setEmployees(prev =>
+  prev.map(e => String(e.empId).trim() === String(empId).trim() ? updatedEmployee : e)
+);
     } catch (err) {
       console.error("❌ Failed to update attendance", err);
       setMessage({ type: "error", text: "Failed to update attendance" });
@@ -131,7 +133,6 @@ export default function AttendanceSheet() {
   };
 
   // Delete employee
-  // ❌ current
 const removeEmployee = async (empId) => {
   if (!window.confirm("Are you sure you want to remove this employee?")) return;
   try {
