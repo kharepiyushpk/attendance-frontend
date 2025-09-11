@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 
-
 const API_BASE = import.meta.env.VITE_API_BASE;
 
 const months = [
@@ -23,7 +22,7 @@ export default function AttendanceSheet() {
   const today = new Date();
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
-  const [employees, setEmployees] = useState([]); // main source of truth from DB
+  const [employees, setEmployees] = useState([]); 
   const [employeeName, setEmployeeName] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [employeeRole, setEmployeeRole] = useState("");
@@ -40,13 +39,13 @@ export default function AttendanceSheet() {
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 7 }, (_, i) => currentYear + i);
 
-  // ---------- Fetch employees once on mount ----------
+  // ---------- Fetch employees ----------
   useEffect(() => {
     const fetchEmployees = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/employees`);
         if (!res.ok) throw new Error("Failed to fetch employees");
-        const data = await res.json(); // expected: array of employee objects
+        const data = await res.json();
         setEmployees(data);
       } catch (err) {
         console.error("❌ Failed to fetch employees", err);
@@ -55,8 +54,7 @@ export default function AttendanceSheet() {
     fetchEmployees();
   }, []);
 
-  // ---------- Helpers for attendance stored per employee ----------
-  // expected employee.attendance: array of { year, month, days: { "1": "Present", "2": "Absent", ... } }
+  // ---------- Helpers ----------
   const getAttendanceRecord = (emp) => {
     if (!emp?.attendance) return null;
     return emp.attendance.find(a => a.year === selectedYear && a.month === selectedMonth) || null;
@@ -64,30 +62,46 @@ export default function AttendanceSheet() {
 
   const getAttendanceStatus = (emp, day) => {
     const rec = getAttendanceRecord(emp);
-    return rec?.days?.[String(day)] || "";
+    if (!rec || !rec.days) return "";
+    if (typeof rec.days.get === "function") {
+      return rec.days.get(String(day)) || "";
+    }
+    return rec.days[String(day)] || "";
   };
 
   const getTotalPresent = (emp) => {
     const rec = getAttendanceRecord(emp);
     if (!rec) return 0;
-    return Object.values(rec.days || {}).filter(s => s === "Present").length;
+    const days = rec.days;
+    let values;
+    if (days && typeof days.values === "function") {
+      values = Array.from(days.values());
+    } else {
+      values = Object.values(days || {});
+    }
+    return values.filter(s => s === "Present").length;
   };
 
-  // Working days = month length - unique holiday days across all employees for selected month/year
   const getWorkingDays = () => {
     const holidaySet = new Set();
     employees.forEach(emp => {
       const rec = getAttendanceRecord(emp);
       if (!rec) return;
-      Object.entries(rec.days || {}).forEach(([d, s]) => {
-        if (s === "Holiday") holidaySet.add(d);
-      });
+      const days = rec.days;
+      if (days && typeof days.entries === "function") {
+        for (const [d, s] of days.entries()) {
+          if (s === "Holiday") holidaySet.add(d);
+        }
+      } else {
+        Object.entries(days || {}).forEach(([d, s]) => {
+          if (s === "Holiday") holidaySet.add(d);
+        });
+      }
     });
     return Math.max(0, maxDaysInMonth - holidaySet.size);
   };
 
-  // ---------- CRUD operations with backend ----------
-  // Add employee
+  // ---------- CRUD ----------
   const handleAddEmployee = async () => {
     const id = employeeId.trim();
     const name = employeeName.trim();
@@ -112,7 +126,6 @@ export default function AttendanceSheet() {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  // Update attendance for a single day (backend returns updated employee)
   const handleStatusChange = async (empId, day, status) => {
     try {
       const res = await fetch(`${API_BASE}/api/employees/${encodeURIComponent(String(empId))}/attendance`, {
@@ -123,8 +136,8 @@ export default function AttendanceSheet() {
       if (!res.ok) throw new Error("Failed to update attendance");
       const updatedEmployee = await res.json();
       setEmployees(prev =>
-  prev.map(e => String(e.empId).trim() === String(empId).trim() ? updatedEmployee : e)
-);
+        prev.map(e => String(e.empId).trim() === String(empId).trim() ? updatedEmployee : e)
+      );
     } catch (err) {
       console.error("❌ Failed to update attendance", err);
       setMessage({ type: "error", text: "Failed to update attendance" });
@@ -132,23 +145,20 @@ export default function AttendanceSheet() {
     }
   };
 
-  // Delete employee
-const removeEmployee = async (empId) => {
-  if (!window.confirm("Are you sure you want to remove this employee?")) return;
-  try {
-    const res = await fetch(`${API_BASE}/api/employees/${encodeURIComponent(empId)}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("Failed to delete employee");
-    setEmployees(prev => prev.filter(e => e.empId !== empId));
-    setMessage({ type: "success", text: "Employee removed" });
-  } catch (err) {
-    console.error("❌ Failed to delete employee", err);
-    setMessage({ type: "error", text: "Failed to delete employee" });
-  }
-  setTimeout(() => setMessage(null), 3000);
-};
+  const removeEmployee = async (empId) => {
+    if (!window.confirm("Are you sure you want to remove this employee?")) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/employees/${encodeURIComponent(empId)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete employee");
+      setEmployees(prev => prev.filter(e => e.empId !== empId));
+      setMessage({ type: "success", text: "Employee removed" });
+    } catch (err) {
+      console.error("❌ Failed to delete employee", err);
+      setMessage({ type: "error", text: "Failed to delete employee" });
+    }
+    setTimeout(() => setMessage(null), 3000);
+  };
 
-
-  // Save edited employee (name/role and optionally empId change)
   const saveEmployeeEdit = async (originalEmpId) => {
     const newEmpId = editEmployeeId.trim();
     const name = editEmployeeName.trim();
@@ -173,14 +183,12 @@ const removeEmployee = async (empId) => {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  // Save attendance button (we auto-save per-change). Keep UX: show success.
   const saveAttendance = async () => {
-  setMessage({ type: "success", text: "All changes are saved (auto-saved on each change)." });
-  setTimeout(() => setMessage(null), 2000);
-};
+    setMessage({ type: "success", text: "All changes are saved (auto-saved on each change)." });
+    setTimeout(() => setMessage(null), 2000);
+  };
 
-
-  // ---------- Export helpers ----------
+  // ---------- Export ----------
   const exportToCSV = () => {
     const header = ["Employee ID","Employee Name","Role","Total Present","Working Days", ...Array.from({ length: maxDaysInMonth }, (_, i) => `Day ${i + 1}`)];
     const rows = employees.map(emp => {
@@ -191,7 +199,13 @@ const removeEmployee = async (empId) => {
         emp.role,
         getTotalPresent(emp),
         getWorkingDays(),
-        ...Array.from({ length: maxDaysInMonth }, (_, day) => rec?.days?.[String(day + 1)] || "")
+        ...Array.from({ length: maxDaysInMonth }, (_, day) => {
+          if (!rec?.days) return "";
+          if (typeof rec.days.get === "function") {
+            return rec.days.get(String(day + 1)) || "";
+          }
+          return rec.days[String(day + 1)] || "";
+        })
       ];
       return row.join(",");
     });
@@ -226,7 +240,13 @@ const removeEmployee = async (empId) => {
         emp.name,
         emp.role,
         getTotalPresent(emp),
-        ...Array.from({ length: maxDaysInMonth }, (_, day) => rec?.days?.[String(day + 1)] || "")
+        ...Array.from({ length: maxDaysInMonth }, (_, day) => {
+          if (!rec?.days) return "";
+          if (typeof rec.days.get === "function") {
+            return rec.days.get(String(day + 1)) || "";
+          }
+          return rec.days[String(day + 1)] || "";
+        })
       ];
       sheet.addRow(row);
     });
@@ -243,7 +263,7 @@ const removeEmployee = async (empId) => {
     emp.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // ---------- JSX (UI unchanged, only data sources changed) ----------
+  // ---------- JSX ----------
   return (
     <div className="p-6 bg-gray-100 min-h-screen font-sans">
       <div className="max-w-7xl mx-auto bg-white p-8 rounded-2xl shadow-lg border border-gray-200">
